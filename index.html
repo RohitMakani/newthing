@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>InsightForge AI - Data Analysis Platform</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f0f2f5; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; text-align: center; margin-bottom: 30px; }
+        .section { margin: 25px 0; padding: 20px; border: 2px solid #e9ecef; border-radius: 10px; background: #f8f9fa; }
+        .section h3 { color: #495057; margin-top: 0; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        input[type="file"], input[type="text"], select { width: 100%; padding: 12px; margin: 8px 0; border: 2px solid #dee2e6; border-radius: 6px; box-sizing: border-box; }
+        button { background-color: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; margin: 8px 0; font-size: 16px; font-weight: bold; }
+        button:hover { background-color: #0056b3; }
+        .result { margin: 15px 0; padding: 15px; border-radius: 8px; }
+        .error { background-color: #f8d7da; border: 2px solid #f5c6cb; color: #721c24; }
+        .success { background-color: #d4edda; border: 2px solid #c3e6cb; color: #155724; }
+        .loading { background-color: #fff3cd; border: 2px solid #ffeaa7; color: #856404; }
+        pre { background: #f1f2f6; padding: 10px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 InsightForge AI - Data Analysis Platform</h1>
+        
+        <div class="section">
+            <h3>📊 Upload Dataset for ML Analysis</h3>
+            <form id="datasetForm" enctype="multipart/form-data">
+                <input type="file" id="dataset" name="file" accept=".csv" required>
+                <select id="taskType" name="task_type" required>
+                    <option value="">Select Task Type</option>
+                    <option value="classification">Classification</option>
+                    <option value="regression">Regression</option>
+                </select>
+                <input type="text" id="targetColumn" name="target_column" placeholder="Target Column Name" required>
+                <input type="file" id="pdfFile" name="pdf_file" accept=".pdf" placeholder="Optional: PDF with charts">
+                <button type="submit">🚀 Start Analysis</button>
+            </form>
+            <div id="datasetResult" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="section">
+            <h3>🎯 Analyze Chart Image</h3>
+            <form id="chartForm" enctype="multipart/form-data">
+                <input type="file" id="chartImage" name="file" accept="image/*" required>
+                <button type="submit">📈 Analyze Chart</button>
+            </form>
+            <div id="chartResult" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="section">
+            <h3>💬 Chat with AI Assistant</h3>
+            <input type="text" id="chatMessage" placeholder="Ask me about your data analysis...">
+            <input type="text" id="sessionId" placeholder="Session ID (optional)">
+            <button onclick="sendChat()">💬 Send Message</button>
+            <div id="chatResult" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="section">
+            <h3>📋 Recent Analysis Sessions</h3>
+            <button onclick="loadSessions()">📊 Load Sessions</button>
+            <div id="sessionsResult" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="section">
+            <h3>🔧 API Health Check</h3>
+            <button onclick="checkHealth()">🏥 Check API Health</button>
+            <div id="healthResult" class="result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        // Show loading state
+        function showLoading(elementId, message = "Processing...") {
+            const element = document.getElementById(elementId);
+            element.className = 'result loading';
+            element.innerHTML = `<p>⏳ ${message}</p>`;
+            element.style.display = 'block';
+        }
+
+        // Dataset Upload
+        document.getElementById('datasetForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            showLoading('datasetResult', 'Uploading and analyzing dataset...');
+            
+            const formData = new FormData();
+            formData.append('file', document.getElementById('dataset').files[0]);
+            formData.append('task_type', document.getElementById('taskType').value);
+            formData.append('target_column', document.getElementById('targetColumn').value);
+            
+            const pdfFile = document.getElementById('pdfFile').files[0];
+            if (pdfFile) {
+                formData.append('pdf_file', pdfFile);
+            }
+
+            try {
+                const response = await fetch('/api/upload-dataset', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                const resultDiv = document.getElementById('datasetResult');
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h4>✅ Analysis Complete!</h4>
+                        <p><strong>Session ID:</strong> ${result.session_id}</p>
+                        <h5>📊 EDA Results:</h5>
+                        <pre>${JSON.stringify(result.eda_results, null, 2)}</pre>
+                        <h5>🤖 ML Results:</h5>
+                        <pre>${JSON.stringify(result.ml_results, null, 2)}</pre>
+                        ${result.pdf_insights ? `<h5>📄 PDF Insights:</h5><pre>${JSON.stringify(result.pdf_insights, null, 2)}</pre>` : ''}
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<p>❌ Error: ${result.detail}</p>`;
+                }
+            } catch (error) {
+                const resultDiv = document.getElementById('datasetResult');
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<p>❌ Error: ${error.message}</p>`;
+            }
+        });
+
+        // Chart Analysis
+        document.getElementById('chartForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            showLoading('chartResult', 'Analyzing chart image...');
+            
+            const formData = new FormData();
+            formData.append('file', document.getElementById('chartImage').files[0]);
+
+            try {
+                const response = await fetch('/api/analyze-chart', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                const resultDiv = document.getElementById('chartResult');
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h4>📊 Chart Analysis Results</h4>
+                        <p><strong>Chart Type:</strong> ${result.chart_type}</p>
+                        <p><strong>Confidence:</strong> ${(result.confidence * 100).toFixed(1)}%</p>
+                        <h5>🔍 Insights:</h5>
+                        <ul>${result.insights.map(insight => `<li>${insight}</li>`).join('')}</ul>
+                        <h5>📈 Extracted Data:</h5>
+                        <pre>${JSON.stringify(result.extracted_data, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<p>❌ Error: ${result.detail}</p>`;
+                }
+            } catch (error) {
+                const resultDiv = document.getElementById('chartResult');
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<p>❌ Error: ${error.message}</p>`;
+            }
+        });
+
+        // Chat Function
+        async function sendChat() {
+            const message = document.getElementById('chatMessage').value;
+            const sessionId = document.getElementById('sessionId').value;
+            
+            if (!message.trim()) return;
+            
+            showLoading('chatResult', 'Getting AI response...');
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: sessionId || null,
+                        context_type: 'general'
+                    })
+                });
+                
+                const result = await response.json();
+                const resultDiv = document.getElementById('chatResult');
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h4>🤖 AI Response</h4>
+                        <p><strong>You:</strong> ${message}</p>
+                        <div style="background: #e3f2fd; padding: 10px; border-radius: 5px; margin: 10px 0;">
+                            <strong>AI:</strong> ${result.response}
+                        </div>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<p>❌ Error: ${result.detail}</p>`;
+                }
+                document.getElementById('chatMessage').value = '';
+            } catch (error) {
+                const resultDiv = document.getElementById('chatResult');
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<p>❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        // Load Sessions
+        async function loadSessions() {
+            showLoading('sessionsResult', 'Loading sessions...');
+            
+            try {
+                const response = await fetch('/api/sessions');
+                const result = await response.json();
+                const resultDiv = document.getElementById('sessionsResult');
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h4>📋 Recent Sessions (${result.sessions.length})</h4>
+                        ${result.sessions.map(session => `
+                            <div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px; background: white;">
+                                <p><strong>📊 ID:</strong> ${session.id}</p>
+                                <p><strong>🎯 Task:</strong> ${session.task_type}</p>
+                                <p><strong>📌 Target:</strong> ${session.target_column}</p>
+                                <p><strong>📅 Created:</strong> ${new Date(session.created_at).toLocaleString()}</p>
+                                <p><strong>📊 Dataset:</strong> ${JSON.stringify(session.dataset_info)}</p>
+                            </div>
+                        `).join('')}
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<p>❌ Error: ${result.detail}</p>`;
+                }
+            } catch (error) {
+                const resultDiv = document.getElementById('sessionsResult');
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<p>❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        // Health Check
+        async function checkHealth() {
+            showLoading('healthResult', 'Checking API health...');
+            
+            try {
+                const response = await fetch('/api/health');
+                const result = await response.json();
+                const resultDiv = document.getElementById('healthResult');
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h4>🏥 API Health Status</h4>
+                        <p><strong>Status:</strong> ${result.status}</p>
+                        <p><strong>Service:</strong> ${result.service}</p>
+                        <p><strong>Version:</strong> ${result.version}</p>
+                        <p><strong>Timestamp:</strong> ${new Date().toLocaleString()}</p>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<p>❌ API Health Check Failed</p>`;
+                }
+            } catch (error) {
+                const resultDiv = document.getElementById('healthResult');
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<p>❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        // Enter key for chat
+        document.getElementById('chatMessage').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendChat();
+            }
+        });
+
+        // Auto health check on page load
+        window.addEventListener('load', function() {
+            setTimeout(checkHealth, 1000);
+        });
+    </script>
+</body>
+</html>
