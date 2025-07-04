@@ -35,7 +35,7 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    session_id = Column(String, nullable=False)
+    session_id = Column(String, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     message = Column(Text, nullable=False)
     response = Column(Text, nullable=False)
