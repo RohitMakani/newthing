@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
@@ -28,14 +28,16 @@ from langdetect import detect
 import pickle
 from dotenv import load_dotenv
 
-from backend.modules.enhanced_vision import CNNChartClassifier, EnhancedImageProcessor
-from backend.modules.enhanced_eda import AutoEDAPipeline
-from backend.modules.enhanced_ml import EnhancedMLPipeline
-from backend.modules.enhanced_chat import IntelligentChatEngine
-from backend.modules.database import DatabaseManager
+# Import local modules
+from enhanced_vision import CNNChartClassifier, EnhancedImageProcessor
+from enhanced_eda import AutoEDAPipeline
+from enhanced_ml import EnhancedMLPipeline
+from enhanced_chat import IntelligentChatEngine
+from database import DatabaseManager, get_db, AnalysisSession, ChatMessage
 
 load_dotenv()
 
+# Environment variables
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 OUTPUT_FOLDER = os.getenv('OUTPUT_FOLDER', 'outputs')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
@@ -43,16 +45,20 @@ GROQ_API_URL = os.getenv('GROQ_API_URL')
 GROQ_MODEL = os.getenv('GROQ_MODEL')
 DATABASE_URL = os.getenv('MONGO_URL', 'sqlite:///./insightforge.db')
 
+# Create directories
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 os.makedirs('static/charts', exist_ok=True)
 
+# Database setup
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Initialize FastAPI app
 app = FastAPI(title="InsightForge AI", version="2.0.0")
 
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -61,8 +67,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Initialize components
 chart_classifier = CNNChartClassifier()
 image_processor = EnhancedImageProcessor()
 eda_pipeline = AutoEDAPipeline()
@@ -70,55 +78,7 @@ ml_pipeline = EnhancedMLPipeline()
 chat_engine = IntelligentChatEngine(GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL)
 db_manager = DatabaseManager(engine)
 
-class AnalysisSession(Base):
-    __tablename__ = "analysis_sessions"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    task_type = Column(String)
-    target_column = Column(String)
-    dataset_info = Column(Text)
-    results = Column(Text)
-    chat_history = Column(Text)
-
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    session_id = Column(String)
-    message = Column(Text)
-    response = Column(Text)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    context_type = Column(String)
-
-Base.metadata.create_all(bind=engine)
-
-app = FastAPI(title="InsightForge AI", version="2.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-chart_classifier = CNNChartClassifier()
-image_processor = EnhancedImageProcessor()
-eda_pipeline = AutoEDAPipeline()
-ml_pipeline = EnhancedMLPipeline()
-chat_engine = IntelligentChatEngine(GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL)
-db_manager = DatabaseManager(engine)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
+# Pydantic models
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
@@ -130,6 +90,7 @@ class ChartAnalysisResponse(BaseModel):
     extracted_data: Dict[str, Any]
     insights: List[str]
 
+# WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -150,9 +111,242 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-@app.get("/")
+# Routes
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    return {"message": "Welcome to InsightForge.AI backend!", "status": "running"}
+    """Serve the main HTML page"""
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>InsightForge AI</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }
+            .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            h1 { color: #333; text-align: center; }
+            .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+            .section h3 { color: #555; margin-top: 0; }
+            input[type="file"], input[type="text"], select { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 4px; }
+            button { background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px 0; }
+            button:hover { background-color: #0056b3; }
+            .result { margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; }
+            .error { background-color: #f8d7da; border: 1px solid #f5c6cb; }
+            .success { background-color: #d4edda; border: 1px solid #c3e6cb; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>InsightForge AI - Data Analysis Platform</h1>
+            
+            <div class="section">
+                <h3>📊 Upload Dataset for Analysis</h3>
+                <form id="datasetForm" enctype="multipart/form-data">
+                    <input type="file" id="dataset" name="file" accept=".csv" required>
+                    <select id="taskType" name="task_type" required>
+                        <option value="">Select Task Type</option>
+                        <option value="classification">Classification</option>
+                        <option value="regression">Regression</option>
+                    </select>
+                    <input type="text" id="targetColumn" name="target_column" placeholder="Target Column Name" required>
+                    <input type="file" id="pdfFile" name="pdf_file" accept=".pdf" placeholder="Optional: PDF with charts">
+                    <button type="submit">🚀 Start Analysis</button>
+                </form>
+                <div id="datasetResult" class="result" style="display: none;"></div>
+            </div>
+
+            <div class="section">
+                <h3>🎯 Analyze Chart Image</h3>
+                <form id="chartForm" enctype="multipart/form-data">
+                    <input type="file" id="chartImage" name="file" accept="image/*" required>
+                    <button type="submit">📈 Analyze Chart</button>
+                </form>
+                <div id="chartResult" class="result" style="display: none;"></div>
+            </div>
+
+            <div class="section">
+                <h3>💬 Chat with AI Assistant</h3>
+                <input type="text" id="chatMessage" placeholder="Ask me about your data analysis...">
+                <input type="text" id="sessionId" placeholder="Session ID (optional)">
+                <button onclick="sendChat()">💬 Send Message</button>
+                <div id="chatResult" class="result" style="display: none;"></div>
+            </div>
+
+            <div class="section">
+                <h3>📋 Recent Analysis Sessions</h3>
+                <button onclick="loadSessions()">📊 Load Sessions</button>
+                <div id="sessionsResult" class="result" style="display: none;"></div>
+            </div>
+        </div>
+
+        <script>
+            // Dataset Upload
+            document.getElementById('datasetForm').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const formData = new FormData();
+                formData.append('file', document.getElementById('dataset').files[0]);
+                formData.append('task_type', document.getElementById('taskType').value);
+                formData.append('target_column', document.getElementById('targetColumn').value);
+                
+                const pdfFile = document.getElementById('pdfFile').files[0];
+                if (pdfFile) {
+                    formData.append('pdf_file', pdfFile);
+                }
+
+                try {
+                    const response = await fetch('/api/upload-dataset', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    const resultDiv = document.getElementById('datasetResult');
+                    
+                    if (response.ok) {
+                        resultDiv.className = 'result success';
+                        resultDiv.innerHTML = `
+                            <h4>✅ Analysis Complete!</h4>
+                            <p><strong>Session ID:</strong> ${result.session_id}</p>
+                            <p><strong>EDA Results:</strong> ${JSON.stringify(result.eda_results.statistics || {}, null, 2)}</p>
+                            <p><strong>ML Results:</strong> ${JSON.stringify(result.ml_results.best_model || {}, null, 2)}</p>
+                        `;
+                    } else {
+                        resultDiv.className = 'result error';
+                        resultDiv.innerHTML = `<p>❌ Error: ${result.detail}</p>`;
+                    }
+                    resultDiv.style.display = 'block';
+                } catch (error) {
+                    const resultDiv = document.getElementById('datasetResult');
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<p>❌ Error: ${error.message}</p>`;
+                    resultDiv.style.display = 'block';
+                }
+            });
+
+            // Chart Analysis
+            document.getElementById('chartForm').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const formData = new FormData();
+                formData.append('file', document.getElementById('chartImage').files[0]);
+
+                try {
+                    const response = await fetch('/api/analyze-chart', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    const resultDiv = document.getElementById('chartResult');
+                    
+                    if (response.ok) {
+                        resultDiv.className = 'result success';
+                        resultDiv.innerHTML = `
+                            <h4>📊 Chart Analysis Results</h4>
+                            <p><strong>Chart Type:</strong> ${result.chart_type}</p>
+                            <p><strong>Confidence:</strong> ${(result.confidence * 100).toFixed(1)}%</p>
+                            <p><strong>Insights:</strong></p>
+                            <ul>${result.insights.map(insight => `<li>${insight}</li>`).join('')}</ul>
+                        `;
+                    } else {
+                        resultDiv.className = 'result error';
+                        resultDiv.innerHTML = `<p>❌ Error: ${result.detail}</p>`;
+                    }
+                    resultDiv.style.display = 'block';
+                } catch (error) {
+                    const resultDiv = document.getElementById('chartResult');
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<p>❌ Error: ${error.message}</p>`;
+                    resultDiv.style.display = 'block';
+                }
+            });
+
+            // Chat Function
+            async function sendChat() {
+                const message = document.getElementById('chatMessage').value;
+                const sessionId = document.getElementById('sessionId').value;
+                
+                if (!message.trim()) return;
+
+                try {
+                    const response = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            message: message,
+                            session_id: sessionId || null,
+                            context_type: 'general'
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    const resultDiv = document.getElementById('chatResult');
+                    
+                    if (response.ok) {
+                        resultDiv.className = 'result success';
+                        resultDiv.innerHTML = `
+                            <h4>🤖 AI Response</h4>
+                            <p><strong>You:</strong> ${message}</p>
+                            <p><strong>AI:</strong> ${result.response}</p>
+                        `;
+                    } else {
+                        resultDiv.className = 'result error';
+                        resultDiv.innerHTML = `<p>❌ Error: ${result.detail}</p>`;
+                    }
+                    resultDiv.style.display = 'block';
+                    document.getElementById('chatMessage').value = '';
+                } catch (error) {
+                    const resultDiv = document.getElementById('chatResult');
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<p>❌ Error: ${error.message}</p>`;
+                    resultDiv.style.display = 'block';
+                }
+            }
+
+            // Load Sessions
+            async function loadSessions() {
+                try {
+                    const response = await fetch('/api/sessions');
+                    const result = await response.json();
+                    const resultDiv = document.getElementById('sessionsResult');
+                    
+                    if (response.ok) {
+                        resultDiv.className = 'result success';
+                        resultDiv.innerHTML = `
+                            <h4>📋 Recent Sessions</h4>
+                            ${result.sessions.map(session => `
+                                <div style="border: 1px solid #ddd; padding: 10px; margin: 5px 0; border-radius: 4px;">
+                                    <p><strong>ID:</strong> ${session.id}</p>
+                                    <p><strong>Task:</strong> ${session.task_type}</p>
+                                    <p><strong>Target:</strong> ${session.target_column}</p>
+                                    <p><strong>Created:</strong> ${new Date(session.created_at).toLocaleString()}</p>
+                                </div>
+                            `).join('')}
+                        `;
+                    } else {
+                        resultDiv.className = 'result error';
+                        resultDiv.innerHTML = `<p>❌ Error: ${result.detail}</p>`;
+                    }
+                    resultDiv.style.display = 'block';
+                } catch (error) {
+                    const resultDiv = document.getElementById('sessionsResult');
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<p>❌ Error: ${error.message}</p>`;
+                    resultDiv.style.display = 'block';
+                }
+            }
+
+            // Enter key for chat
+            document.getElementById('chatMessage').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendChat();
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
 @app.get("/api/health")
 async def health_check():
@@ -177,11 +371,11 @@ async def upload_dataset(
         normalized_target = target_column.strip().replace(" ", "").title()
 
         if normalized_target not in df.columns:
-            raise HTTPException(400, f"Target column '{target_column}' not found")
+            raise HTTPException(400, f"Target column '{target_column}' not found. Available columns: {list(df.columns)}")
 
         cleaned_df, eda_results = await eda_pipeline.run_analysis(df, task_type, normalized_target)
         model_results = await ml_pipeline.train_and_evaluate(cleaned_df, task_type, normalized_target)
-        print("step 1")
+
         pdf_insights = None
         if pdf_file:
             pdf_path = os.path.join(UPLOAD_FOLDER, f"{session_id}_{pdf_file.filename}")
@@ -204,7 +398,6 @@ async def upload_dataset(
                 "pdf_insights": pdf_insights
             })
         )
-        print("step 2")
         db.add(session_data)
         db.commit()
 
@@ -216,7 +409,6 @@ async def upload_dataset(
         }
 
     except Exception as e:
-        print("error")
         raise HTTPException(500, f"Upload error: {str(e)}")
 
 @app.post("/api/analyze-chart")
@@ -245,7 +437,7 @@ async def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db)):
     try:
         context = {}
         if request.session_id:
-            session = db.query(AnalysisSession).filter_by(id=request.session_id).first()
+            session = db.query(AnalysisSession).filter(AnalysisSession.id == request.session_id).first()
             if session:
                 context = {
                     "task_type": session.task_type,
